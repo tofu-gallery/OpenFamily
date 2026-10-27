@@ -1,3 +1,6 @@
+// Tofu (2026-10-27): modified for Tofu's app gallery: runVersionedMigrations can
+// run inside the caller's transaction (`inTransaction`). See TOFU.md.
+//
 // Versioned migrations: each one runs exactly once, in its own transaction, and
 // is recorded in openfamily_schema_migrations with a checksum of its SQL.
 //
@@ -68,11 +71,18 @@ export const validateRegistry = (migrations: readonly Migration[]): void => {
  * Applies every registered migration not yet recorded. The caller holds the
  * migration lock and passes its client, so the whole run is serialised with
  * any other server instance starting at the same time.
+ *
+ * Tofu (2026-10-27): with `inTransaction`, the caller has already opened the
+ * transaction that holds the lock (a transaction-level advisory lock, see
+ * db.ts), so each migration runs inside it instead of in a transaction of its
+ * own, and a failure rolls back the caller's whole schema step.
  */
 export const runVersionedMigrations = async (
     client: PoolClient,
-    migrations: readonly Migration[]
+    migrations: readonly Migration[],
+    options: { inTransaction?: boolean } = {}
 ): Promise<MigrationReport> => {
+    const inTransaction = options.inTransaction === true;
     validateRegistry(migrations);
 
     await client.query(`
@@ -112,7 +122,7 @@ export const runVersionedMigrations = async (
         }
 
         const started = Date.now();
-        await client.query('BEGIN');
+        if (!inTransaction) await client.query('BEGIN');
         try {
             for (const statement of migration.statements) {
                 await client.query(statement);
@@ -121,9 +131,9 @@ export const runVersionedMigrations = async (
                 `INSERT INTO ${MIGRATIONS_TABLE} (id, checksum, duration_ms) VALUES ($1, $2, $3)`,
                 [migration.id, checksum, Date.now() - started]
             );
-            await client.query('COMMIT');
+            if (!inTransaction) await client.query('COMMIT');
         } catch (error) {
-            await client.query('ROLLBACK').catch(() => {});
+            if (!inTransaction) await client.query('ROLLBACK').catch(() => {});
             const reason = error instanceof Error ? error.message : String(error);
             throw new Error(`Migration "${migration.id}" failed and was rolled back: ${reason}`);
         }

@@ -1,8 +1,15 @@
-import { Pool, types } from 'pg';
+// Tofu (2026-10-27): modified for Tofu's app gallery. The pool connects through
+// DATABASE_URL with TLS when it is set, never exits on an idle connection's error,
+// and the schema step runs in one transaction under a transaction-level advisory
+// lock with row-level security on. See TOFU.md.
+import { createHash } from 'crypto';
+import { Pool, PoolClient, PoolConfig, types } from 'pg';
 import { loadEnv } from './config/loadEnv';
 import logger from './lib/logger';
-import { runVersionedMigrations } from './migrations/runner';
+import { checksumOf, runVersionedMigrations } from './migrations/runner';
 import { coreMigrations } from './migrations/registry';
+import { tofuMigrations } from './migrations/tofuRegistry';
+import { databaseUrlConfig, usesDatabaseUrl } from './lib/tofuDatabase';
 
 loadEnv();
 
@@ -16,7 +23,9 @@ types.setTypeParser(1082, (val: string) => val);
 // UTC ISO string in JSON, shifting appointment times by the server's UTC offset.
 types.setTypeParser(1114, (val: string) => val.replace(' ', 'T').replace(/\.\d+$/, ''));
 
-if (!process.env.POSTGRES_PASSWORD) {
+// Tofu (2026-10-27): DATABASE_URL carries its own password, so the POSTGRES_PASSWORD
+// check only applies when the server connects through the POSTGRES_* settings.
+if (!usesDatabaseUrl() && !process.env.POSTGRES_PASSWORD) {
     if (process.env.NODE_ENV === 'production') {
         logger.error('db.missing_password', {
             message: 'POSTGRES_PASSWORD is not set. Refusing to start in production with the default password — set it in your .env file.',
@@ -28,23 +37,39 @@ if (!process.env.POSTGRES_PASSWORD) {
     });
 }
 
-const pool = new Pool({
-    host: process.env.POSTGRES_HOST || 'localhost',
-    port: parseInt(process.env.POSTGRES_PORT || '5432'),
-    database: process.env.POSTGRES_DB || 'openfamily',
-    user: process.env.POSTGRES_USER || 'openfamily',
-    password: process.env.POSTGRES_PASSWORD || 'changeme',
-    max: 20,
-    idleTimeoutMillis: 30000,
-    connectionTimeoutMillis: 2000,
-});
+// Tofu (2026-10-27): with DATABASE_URL (a copy on Tofu), each process keeps a
+// small pool, because Tofu may run several processes of the app against one
+// connection pooler, and waits up to 10 s for a connection, because a new TLS
+// connection through the pooler can take longer than upstream's 2 s.
+const poolConfig: PoolConfig = usesDatabaseUrl()
+    ? {
+        ...databaseUrlConfig(),
+        max: Number.parseInt(process.env.DATABASE_POOL_MAX || '5', 10) || 5,
+        idleTimeoutMillis: 30000,
+        connectionTimeoutMillis: 10000,
+    }
+    : {
+        host: process.env.POSTGRES_HOST || 'localhost',
+        port: parseInt(process.env.POSTGRES_PORT || '5432'),
+        database: process.env.POSTGRES_DB || 'openfamily',
+        user: process.env.POSTGRES_USER || 'openfamily',
+        password: process.env.POSTGRES_PASSWORD || 'changeme',
+        max: 20,
+        idleTimeoutMillis: 30000,
+        connectionTimeoutMillis: 2000,
+    };
 
+const pool = new Pool(poolConfig);
+
+// Tofu (2026-10-27): an idle connection that the pooler or the network closes is
+// dropped from the pool and replaced on the next query. Upstream ended the whole
+// process here, which on Tofu turned one closed connection into a failed request
+// for everyone using the app at that moment.
 pool.on('error', (err) => {
     logger.error('db.pool_error', {
         error: err instanceof Error ? err.message : String(err),
         stack: err instanceof Error && process.env.NODE_ENV !== 'production' ? err.stack : undefined,
     });
-    process.exit(-1);
 });
 
 export const query = async (text: string, params?: any[]) => {
@@ -96,6 +121,77 @@ export const getClient = async () => {
 
 // Serialises schema changes between server instances starting at the same time.
 const MIGRATION_LOCK = "hashtext('openfamily.migrations')";
+
+// Tofu (2026-10-27): how a start takes part in the schema step. Tofu starts a
+// new deployment several times within a second or two, every start against the
+// same database, and reaches it through a transaction pooler, which hands a
+// session to whoever asks next as soon as a transaction ends. Upstream took a
+// session-level pg_advisory_lock there, which the pooler can strand. Instead,
+// the whole schema step (the historical list, the versioned migrations, row-level
+// security and a record of what was done) runs in ONE transaction that first
+// takes the transaction-level lock: one start does it, the others wait for the
+// lock and then find it done. A start whose code finds its own record and no
+// table left open skips the step without taking the lock.
+const SCHEMA_LOCK_WAIT_MS = 120_000;
+const SCHEMA_LOCK_POLL_MS = 250;
+
+// The one row that says which code made this schema: a hash of every statement
+// the step runs. The table is Tofu's; upstream's code ignores it.
+const SCHEMA_STATE_TABLE = 'tofu_schema_state';
+
+// On Supabase, which Tofu's databases are, a new table in public can be opened
+// to the Data API's roles (anon, authenticated) by the database's default
+// privileges. With row-level security on and no policy, those roles see no row
+// and write none; the app's own connection owns the tables and is not limited.
+// Only tables this connection's role owns, in the schema it uses, and only where
+// both roles exist; never turned off; idempotent.
+const DATA_API_ROLES_PRESENT = `EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon')
+    AND EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated')`;
+const OWN_TABLES_WITHOUT_RLS = `FROM pg_class c
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE c.relkind = 'r'
+      AND n.nspname = current_schema()
+      AND c.relowner = (SELECT oid FROM pg_roles WHERE rolname = current_user)
+      AND NOT c.relrowsecurity`;
+const ENABLE_ROW_LEVEL_SECURITY = `DO $$
+DECLARE
+    t regclass;
+BEGIN
+    IF ${DATA_API_ROLES_PRESENT} THEN
+        FOR t IN SELECT c.oid::regclass ${OWN_TABLES_WITHOUT_RLS} LOOP
+            EXECUTE format('ALTER TABLE %s ENABLE ROW LEVEL SECURITY', t);
+        END LOOP;
+    END IF;
+END
+$$`;
+
+type RunQuery = (text: string) => Promise<{ rows: any[] }>;
+
+const schemaFingerprint = (historical: readonly string[]): string => {
+    const hash = createHash('sha256');
+    for (const statement of historical) {
+        hash.update(statement);
+        hash.update('\u0000');
+    }
+    for (const migration of [...coreMigrations, ...tofuMigrations]) {
+        hash.update(migration.id);
+        hash.update(checksumOf(migration));
+    }
+    hash.update(ENABLE_ROW_LEVEL_SECURITY);
+    return hash.digest('hex');
+};
+
+/** True when this code already made the schema and no table of the app is left without row-level security. */
+const schemaIsCurrent = async (run: RunQuery, fingerprint: string): Promise<boolean> => {
+    const present = await run(`SELECT to_regclass('${SCHEMA_STATE_TABLE}') IS NOT NULL AS present`);
+    if (!present.rows[0]?.present) return false;
+    const state = await run(`SELECT fingerprint FROM ${SCHEMA_STATE_TABLE} WHERE id = 1`);
+    if (state.rows[0]?.fingerprint !== fingerprint) return false;
+    const open = await run(`SELECT count(*)::int AS open_tables ${OWN_TABLES_WITHOUT_RLS} AND ${DATA_API_ROLES_PRESENT}`);
+    return Number(open.rows[0]?.open_tables ?? 0) === 0;
+};
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export const runMigrations = async () => {
     // The historical list below is idempotent and runs on every start, as it
@@ -635,29 +731,74 @@ export const runMigrations = async () => {
         // End of the historical list. New migrations: migrations/registry.ts.
     ];
 
-    const client = await pool.connect();
-    try {
-        await client.query(`SELECT pg_advisory_lock(${MIGRATION_LOCK})`);
+    // Tofu (2026-10-27): one transaction under pg_try_advisory_xact_lock instead
+    // of a session-level pg_advisory_lock; see SCHEMA_LOCK_WAIT_MS above.
+    const fingerprint = schemaFingerprint(migrations);
+    if (await schemaIsCurrent((text) => pool.query(text), fingerprint)) {
+        logger.info('db.migrations_current', { fingerprint: fingerprint.slice(0, 12) });
+        return;
+    }
+
+    const startedAt = Date.now();
+    let waiting = false;
+    for (;;) {
+        const client: PoolClient = await pool.connect();
         try {
+            await client.query('BEGIN');
+            const lock = await client.query(`SELECT pg_try_advisory_xact_lock(${MIGRATION_LOCK}) AS locked`);
+            if (!lock.rows[0]?.locked) {
+                await client.query('ROLLBACK');
+                if (!waiting) {
+                    waiting = true;
+                    logger.info('db.migrations_waiting', { reason: 'another start holds the schema lock' });
+                }
+                if (Date.now() - startedAt > SCHEMA_LOCK_WAIT_MS) {
+                    throw new Error('Timed out waiting for another start of the app to finish the schema');
+                }
+                await sleep(SCHEMA_LOCK_POLL_MS);
+                continue;
+            }
+
+            if (await schemaIsCurrent((text) => client.query(text), fingerprint)) {
+                await client.query('COMMIT');
+                logger.info('db.migrations_done_by_another_start', { waitedMs: Date.now() - startedAt });
+                return;
+            }
+
             for (const migration of migrations) {
                 await client.query(migration);
             }
-            const report = await runVersionedMigrations(client, coreMigrations);
+            const report = await runVersionedMigrations(client, [...coreMigrations, ...tofuMigrations], { inTransaction: true });
             if (report.unknown.length > 0) {
                 // A newer OpenFamily ran against this database before this one.
                 // Its tables are still there; say so rather than refuse to start.
                 logger.warn('db.migrations_unknown', { ids: report.unknown });
             }
+            await client.query(`CREATE TABLE IF NOT EXISTS ${SCHEMA_STATE_TABLE} (
+                id SMALLINT PRIMARY KEY CHECK (id = 1),
+                fingerprint CHAR(64) NOT NULL,
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            )`);
+            await client.query(ENABLE_ROW_LEVEL_SECURITY);
+            await client.query(
+                `INSERT INTO ${SCHEMA_STATE_TABLE} (id, fingerprint) VALUES (1, $1)
+                 ON CONFLICT (id) DO UPDATE SET fingerprint = EXCLUDED.fingerprint, updated_at = now()`,
+                [fingerprint]
+            );
+            await client.query('COMMIT');
             logger.info('db.migrations_complete', {
                 historical: migrations.length,
                 applied: report.applied,
                 alreadyApplied: report.alreadyApplied,
+                waitedMs: Date.now() - startedAt,
             });
+            return;
+        } catch (error) {
+            await client.query('ROLLBACK').catch(() => {});
+            throw error;
         } finally {
-            await client.query(`SELECT pg_advisory_unlock(${MIGRATION_LOCK})`).catch(() => {});
+            client.release();
         }
-    } finally {
-        client.release();
     }
 };
 
