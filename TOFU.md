@@ -1,0 +1,96 @@
+# Tofu gallery copy
+
+This repository is Tofu's copy of **NexaFlowFrance/OpenFamily** (licence: AGPL-3.0), listed in Tofu's app gallery as **OpenFamily**: a family organizer made for phones. A shared shopping list with a store mode, chores with pocket-money points, a family calendar with an iCal feed, weekly schedules, recipes, a meal plan, a budget, family posts and notes, with parent and child accounts in seven languages. It installs on a phone's home screen as a web app (PWA).
+
+- `main` mirrors the upstream repository and is never committed to by Tofu.
+- `tofu` carries Tofu's own changes; tags named `pin/<date>` mark the versions the gallery points to. The current pin is `pin/2026-10-27`.
+- A visitor who chooses this app gets a private snapshot of the pinned version in their own Tofu account, with its own database. Their copy does not follow upstream updates.
+- Upstream: https://github.com/NexaFlowFrance/OpenFamily at `edbbae0869d5a96bbb35de7230b134ae5c70eea4` (`main` on 2026-10-27, version 1.9.0). Upstream has no hosted version and no paid tier; a copy is how a family gets one without running a server.
+
+## How Tofu runs it
+
+- Framework preset `container`, root folder: the repository root. Tofu builds the root `Dockerfile` and runs the image as a service, so there is no separate install command, build command or output directory.
+- The `Dockerfile` (Tofu's) has two stages, both on `node:26-alpine` as upstream's images:
+  - Build: `npm ci --include=dev` for the whole workspace at the lockfile's versions, then `npm run build` in `shared/`, `server/` (TypeScript to `server/dist`) and `client/` (the i18n check, `tsc` and `vite build` to `client/dist`, with the API and WebSocket on the page's own origin).
+  - Image: `npm ci --omit=dev` for the server and shared workspaces, the three `dist` folders, `NODE_ENV=production` and `SERVE_CLIENT_DIR=/app/client/dist`; it starts `node server/dist/index.js` as root.
+- One process serves everything on `PORT` (Tofu sets 80): the built web app with upstream's content security policy for it, `/api`, and the live-update WebSocket on `/ws`. This is upstream's own way of serving the web app from the server (its Windows install). Upstream's `server/Dockerfile`, `client/Dockerfile` (nginx) and `docker-compose.yml` are unchanged and unused by Tofu.
+- Database: PostgreSQL, the copy's Tofu database, through `DATABASE_URL` (a transaction pooler, `sslmode=require`), verified against `SUPABASE_CA_CERT`, the pooler's certificate authority, which Tofu saves with the database. The app makes its own schema when it starts (not at build): upstream's historical list of idempotent statements, upstream's versioned migrations (`server/src/migrations/registry.ts`) and Tofu's own (`server/src/migrations/tofuRegistry.ts`), all in one transaction under one advisory lock (see "Start-up when several starts run at once"). There is no `supabase/migrations` folder, so Tofu applies nothing before the build.
+- Settings Tofu saves before the first deploy: `PORT`, `DATABASE_URL` and `SUPABASE_CA_CERT` (Tofu's), `SOURCE_URL` (the pin's exact source, for the Source code link) and `APP_PUBLIC_URL` (the copy's own address, for invitation and password-reset links). Nothing has to be typed by hand.
+- Secrets: the server needs `JWT_SECRET`. When it is unset, it is derived from `DATABASE_URL` at start (HMAC-SHA256, 64 hexadecimal characters, the same in every process). It signs every sign-in (valid 7 days) and is the key that encrypts the integration credentials and AI provider keys a family saves in Settings. Saving a `JWT_SECRET`, or a `DATABASE_URL` that changes (a restored or different database, a new database password), signs everybody out once, and those saved credentials and keys have to be entered again.
+- Optional settings the owner may add on the app's Keys & settings page, then deploy again:
+  - `REGISTRATION_ENABLED` = `false` closes sign-up (see "Accounts and the family").
+  - `SMTP_HOST`, `SMTP_PORT` (587), `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS` (hidden), `MAIL_FROM`: email for invitations and "Forgot password".
+  - `TZ`, the family's time zone (for example `America/New_York`): calendar imports read dated events in it, and the iCal feed names it.
+  - Web push (`VAPID_*`) is not set up and stays off.
+
+## Accounts and the family
+
+- OpenFamily has its own accounts. **There is no administrator of the whole server**: every account made without an invitation is the owner of a family of its own, which sees nothing of any other family. The first account on a copy gets nothing more than that.
+- Sign-up is open on a new copy, so anyone who opens its address could make an account (and a family of their own) on the owner's database. The owner makes their account first, then saves `REGISTRATION_ENABLED` as `false` and deploys again: the sign-in page then hides "Sign up", the server refuses sign-ups (`403 Registration is disabled`), existing accounts keep signing in, and invitation links still let people in.
+- How a second person joins a family:
+  1. The owner opens **Family** (the Family tab on a phone), goes to **Invite a member**, picks **Invite as** Parent or Child, and taps **Generate an invite link** (an email address there sends the link by email, which needs the SMTP settings; without them the link is shown to share by hand). The link is `<address>/join?invite=<code>`, valid for 7 days, used once.
+  2. The owner sends the link (a message, a chat).
+  3. The other person opens it on their phone. The sign-up form opens with the invitation's banner; they enter their name, email and a password (8 characters at least) and tap **Sign up**.
+  4. They are in the family and land on its home page (**Today**). They see the same shopping list under **Lists** (the Shopping page, `/shopping`, and its **Store mode**), the same tasks, calendar and the rest; a Child account can change less than a Parent.
+  - Someone who already has an account opens the link while signed in and confirms on the **Join a family** page. A person can also ask to join by the owner's email address from their own Family page; the owner accepts the request under **Access requests**.
+- The shared shopping list shows on **Lists** (Shopping), in its **Store mode** (the list grouped by aisle with large check boxes, for use in a shop), and as a count on **Today**.
+
+## What Tofu changes
+
+Every commit on `tofu` starts with `Tofu:` and says why. Every changed upstream file carries a dated `Tofu (2026-10-27)` notice at its top and a note at the change.
+
+- `Dockerfile` and `.dockerignore` (new); `server/src/index.ts`: one image whose server serves the web app, `/api` and `/ws` together, listening on `PORT` before `SERVER_PORT`.
+- `server/src/lib/tofuDatabase.ts` (new) and `server/src/db.ts`: the pool connects through `DATABASE_URL` when it is set, with `SUPABASE_CA_CERT` as an extra trusted root (verification stays on), keeps 5 connections per process instead of 20 (`DATABASE_POOL_MAX` changes it), waits up to 10 s for a connection instead of 2 s, and no longer ends the process when an idle connection is closed. Without `DATABASE_URL`, upstream's `POSTGRES_*` settings work as before.
+- `server/src/db.ts` and `server/src/migrations/runner.ts`: the schema step in one transaction under a transaction-level advisory lock (below), with row-level security on, and a record of the code that made the schema (`tofu_schema_state`).
+- `server/src/config/loadEnv.ts`: `JWT_SECRET` derived from `DATABASE_URL` when it is unset (above).
+- `server/src/app.ts`, `client/src/components/app/SourceCodeLink.tsx` (new), `client/src/pages/Login.tsx`, `client/src/pages/Settings.tsx` and the seven `auth.json` translations: `GET /api/source` names this copy's source (`SOURCE_URL`, else the fork's `tofu` branch); the sign-in page's footer links it before anyone signs in, and the Settings support card's link to the upstream repository now points there. The links to the author's sponsor pages stay.
+- English, US dollars and UTC as defaults instead of French, euros and Paris: a new account takes the browser's language when the app speaks it, else English (upstream: French, so an English browser switched to French right after sign-up), and US dollars (`tofu/0001-english-defaults`); both change in Settings. The page title, description and web-app manifest are English. Calendar imports and reminders use `TZ` or UTC, and the iCal feed names a zone only when `TZ` is set, because its times are the family's own clock time and upstream's `Europe/Paris` moved every event for a family elsewhere. The language picker and all seven languages stay (`server/src/routes/auth.ts`, `calendar.ts`, `calendarSources.ts`, `familyInvites.ts`, `rewards.ts`, `server/src/lib/calendarSources.ts`, `reminderScheduler.ts`, `notifications.ts`, `mailer.ts`, `client/index.html`, `client/vite.config.ts`, `client/src/lib/utils.ts` and five pages' currency fallback).
+- `client/src/pages/Family.tsx`: the shared accounts list fits a phone. As soon as a family had a second account, its row made the whole Family page 461 pixels wide on a 390-pixel phone.
+- `client/src/pages/Login.tsx`: a sign-up through an invitation ends on the home page. Upstream stayed on the invitation's address, where the join page then told the person who had just joined "Unable to verify the invitation".
+- `.env.production.example` removed: Tofu's own upload refuses a file named `.env.*` other than `.env.example`. Nothing read it; `.env.example` stays.
+
+What is not changed: the live-update WebSocket (same process and port, no polling added), the reminder and calendar-subscription schedulers, the integrations, the AI assistant, the Android app sources and upstream's other install paths.
+
+## What works differently on Tofu
+
+- **Live updates.** Upstream pushes a change to the other open pages over the WebSocket on `/ws`, from the process that handled the change to the sockets that same process holds. Tofu starts apps on demand, stops them when idle and may run several processes at once, so a change may not reach a page whose socket another process holds; reloading the page shows it. Separately, upstream registers each socket under its own account but sends a family's updates to the family owner's account only, so the owner's own devices hear a change made by anyone, while a member's phone hears none, even with one process (measured locally, see "Verification"). This copy keeps upstream's live updates exactly as they are so that a real deploy can measure them.
+- **Reminders and refreshes.** Appointment reminders (checked every minute) and the refresh of followed outside calendars (every 30 minutes) run on `node-cron` inside the server process. Tofu stops an idle app and may run several processes, so they cannot be relied on: a reminder may not come, or may come from each running process. Web push is not set up.
+- **Email.** No email leaves without the owner's SMTP settings: invitations are shared as links, and "Forgot password" cannot send its email.
+- **Files.** Nothing is kept on the server's disk: profile photos and post photos are stored in the database as small data URLs, as upstream does.
+- **AI assistant and integrations** (Mealie, Tandoor, Home Assistant, Grocy, Nextcloud, Immich) stay off until a parent enters their own provider key or server in Settings; their scheduled syncs have the same limits as the reminders.
+- **Rate limits** are upstream's, per IP address: 10 failed sign-ins per 15 minutes, and 30 requests per 15 minutes to the AI, recipe-import and integration routes (the app also asks the AI routes for their status on page loads).
+
+## Start-up when several starts run at once
+
+Tofu starts a new deployment several times within a second or two, every start against the same empty database. Upstream serialised its schema step with a session-level `pg_advisory_lock`, which a transaction pooler can hand to someone else. In this copy a start:
+
+1. reads `tofu_schema_state`; if it records this code's schema and every table of the app already has row-level security, it skips the step (one round of three short queries, no lock);
+2. otherwise opens one transaction and tries `pg_try_advisory_xact_lock`; if another start holds it, it logs `db.migrations_waiting` and waits for it in the same transaction (`pg_advisory_xact_lock`, `lock_timeout` 120 s);
+3. under the lock, reads the record again: if another start made the schema meanwhile, it commits and logs `db.migrations_done_by_another_start`;
+4. otherwise runs upstream's historical list, the versioned migrations (each recorded in `openfamily_schema_migrations`, inside this transaction), turns row-level security on, writes the record and commits (`db.migrations_complete`).
+
+Row-level security: on a database that has the Data API's roles (`anon` and `authenticated`), every ordinary table the app's role owns in its schema gets row-level security, with no policy. Tofu's databases are Supabase PostgreSQL, whose older default privileges give every new table in `public` to those roles; with row-level security on, they see no row and write none, while the app's own connection owns the tables and is not limited. Nothing is done where those roles do not exist, and row-level security is never turned off.
+
+## Needs a real deploy to verify
+
+- The image build on Tofu's container hosting (`node:26-alpine`; bcrypt's prebuilt binary for Alpine is in its npm package) and the start on `PORT` 80 as root. Locally the build ran without Docker on Node 22.22.3, the minimum upstream supports (see "Verification").
+- The WebSocket upgrade on `/ws` through Tofu's hosting, how many processes serve a copy, and how long one person's change takes to reach another phone (the gallery's two-phone measurement).
+- The connection through the real transaction pooler: its certificate against `SUPABASE_CA_CERT`, node-postgres' unnamed prepared statements, and `CREATE EXTENSION IF NOT EXISTS "uuid-ossp"` with `uuid_generate_v4()` found on the role's search path (Supabase keeps extensions in its `extensions` schema).
+- The client address the rate limits see (`trust proxy` is 1, upstream's setting) and the cold-start time.
+
+## Licence
+
+- AGPL-3.0 (`licence.md`), unchanged, as are upstream's copyright lines. Every upstream file Tofu changed carries a dated `Tofu (2026-10-27)` modification notice; new files say they are Tofu's.
+- Source offer (section 13): every copy links its own source on the sign-in page and in Settings, from `SOURCE_URL`, which the gallery sets to the pinned tag of this repository.
+- OpenFamily's name and logo are upstream's. The web app bundles the Fraunces and Instrument Sans fonts (SIL Open Font License; upstream ships no copy of that licence beside them) and the Tandoor logo for that integration. The Settings support card links the upstream author's sponsor pages.
+
+## Verification (2026-10-27)
+
+All local, on 127.0.0.1, without Docker; nothing was deployed.
+
+- **File modes (rule 1).** `git archive tofu | tar -x`, then `find <tree> -type f -exec chmod a-x {} +` (0 executable files left). From that tree, the Dockerfile's steps: `npm ci --include=dev` (748 packages), `npm run build` in `shared/`, `server/` and `client/` (i18n check: "OK: 7 languages, 22 namespaces"; 21 files, 2.9 MB in `client/dist`), then a separate production tree with `npm ci --omit=dev --workspace=server --workspace=shared --include-workspace-root` (136 packages) and the three `dist` folders, started with `node server/dist/index.js`, `NODE_ENV=production`, `SERVE_CLIENT_DIR` and `PORT`. Nothing executes a repository file directly.
+- **Database and TLS.** A scratch PostgreSQL 14 that accepts TLS only, with its own certificate authority, the `anon` and `authenticated` roles and Supabase's older default privileges. `DATABASE_URL=postgresql://postgres@127.0.0.1:<port>/<db>?sslmode=require`: without `SUPABASE_CA_CERT` the start fails ("unable to verify the first certificate"); with it, the server starts, makes 34 tables with row-level security on all 34, applies the 8 versioned migrations (7 upstream, 1 Tofu) and answers `/`, `/health` and `/api`. Every run had `HOME` set to a folder with mode 000: the server is node-postgres (no libpq) in one process that runs as root and never switches user, so the libpq certificate trap does not apply.
+- **Five starts at once (rule 4)** on an empty database: all five answered `GET /` and `/health` with 200, 0.6 s after the starts; one start made the schema in 60 ms (`db.migrations_complete`), the other four logged `db.migrations_waiting` then `db.migrations_done_by_another_start` after 62–65 ms; 8 migration rows, 34 of 34 tables with row-level security, 1 schema-state row, no error in any log. A later start skipped the step (`db.migrations_current`). (A first version that polled the lock made the last of four waiting starts wait about a second; the waiting now happens in Postgres.)
+- **Accounts, the core action and invitations** (`live-check.py` in Tofu's gallery work folder, against the final build): the owner's account made with the sign-up form's request, in English and US dollars; sign-in; an item put on the shopping list and read back; an invitation link on `APP_PUBLIC_URL`; a second account made through it, in the family, seeing the same list; `/api/source` naming `SOURCE_URL`. With `REGISTRATION_ENABLED=false`: sign-up without an invitation answered 403, with an invitation 200 (a Child account, which could add to the list and was refused a parent-only change). A sign-in made by one process was accepted by another (the same derived `JWT_SECRET`).
+- **Live updates, one local process:** a member's change reached the owner's socket in about 1 ms, and the owner's change reached the owner's second socket; the owner's change never reached the member's socket (8 s), as upstream's code says.
+- **In a browser** (Playwright with Chromium, 390×844 phone with touch, and 1200×750): the owner signed up through the form; the Family page made an invitation link; on the phone the link opened the sign-up form with the invitation banner, the new member signed up and landed on Today; the sign-in page shows the Source code link without overlapping the form. On twelve pages (Today, Shopping, Tasks, Appointments, Planning, Recipes, Meals, Budget, Family, Posts, Pocket money, Settings) nothing scrolls sideways and no content ends under the phone's bottom tab bar, at both sizes; no page error.
