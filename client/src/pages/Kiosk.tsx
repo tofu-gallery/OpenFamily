@@ -1,3 +1,5 @@
+// Tofu (2026-10-27): modified for Tofu's app gallery: one subscription for every entity the kiosk
+// shows, so a refresh runs its loader once. See TOFU.md.
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
@@ -188,12 +190,7 @@ const Kiosk: React.FC = () => {
         const id = setInterval(() => void loadAll(), 60_000); // refresh every minute
         return () => clearInterval(id);
     }, []);
-    useWebSocketUpdates('appointments', () => void loadAll());
-    useWebSocketUpdates('tasks', () => void loadAll());
-    useWebSocketUpdates('meal-plans', () => void loadAll());
-    useWebSocketUpdates('planning', () => void loadAll());
-    useWebSocketUpdates('shopping', () => void loadAll());
-    useWebSocketUpdates('notes', () => void loadAll());
+    useWebSocketUpdates(['appointments', 'tasks', 'meal-plans', 'planning', 'shopping', 'notes'], () => void loadAll());
 
     // Persist per-device settings
     useEffect(() => {

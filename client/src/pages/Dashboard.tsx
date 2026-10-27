@@ -1,4 +1,5 @@
-// Tofu (2026-10-27): modified for Tofu's app gallery: US dollars when no currency is saved. See TOFU.md.
+// Tofu (2026-10-27): modified for Tofu's app gallery: US dollars when no currency is saved, and one
+// subscription for the entities that reload everything, so a refresh runs that loader once. See TOFU.md.
 import React, { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useWebSocketUpdates } from '../hooks/useWebSocketUpdates';
@@ -86,10 +87,7 @@ const Dashboard: React.FC = () => {
     const weekStart = useMemo(() => startOfWeek(new Date(), { weekStartsOn: firstDay }), [firstDay]);
 
     useEffect(() => { void loadAll(); }, [agendaView]);
-    useWebSocketUpdates('tasks', () => { void loadAll(); });
-    useWebSocketUpdates('shopping', () => { void loadAll(); });
-    useWebSocketUpdates('appointments', () => { void loadAll(); });
-    useWebSocketUpdates('budget', () => { void loadAll(); });
+    useWebSocketUpdates(['tasks', 'shopping', 'appointments', 'budget'], () => { void loadAll(); });
     useWebSocketUpdates('planning', () => { void loadPlanning(); });
     useWebSocketUpdates('notes', () => { void loadNotes(); });
     useWebSocketUpdates('posts', () => { void loadLatestPost(); });

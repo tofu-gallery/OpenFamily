@@ -1,3 +1,7 @@
+// Tofu (2026-10-27): modified for Tofu's app gallery: the open screen's data is also
+// asked for again when the page comes back to the front or back online, and every 15
+// seconds while it is visible, so a change reaches it when its socket is not connected
+// or is held by another process. See TOFU.md.
 import React, {
     createContext,
     useContext,
@@ -54,6 +58,16 @@ const RECONNECT_DELAY_MS = 2_000;
 const RECONNECT_MAX_DELAY_MS = 30_000;
 const PING_INTERVAL_MS = 25_000;
 
+// Tofu (2026-10-27): on Tofu an app may run as several processes, and none of them may
+// stay up between requests, so the socket can be closed, or connected to a process that
+// never hears about a change another process handled. The screen then reloads what it
+// shows when the page comes back to the front or back online, and every 15 seconds while
+// it is visible: the same loaders a socket update runs, never while the page is hidden.
+// Socket updates work as before.
+const REFRESH_WHILE_VISIBLE_MS = 15_000;
+// Coming back fires visibilitychange and focus together: one refresh for both.
+const REFRESH_MIN_GAP_MS = 2_000;
+
 // ─── Provider ────────────────────────────────────────────────────────────────
 
 export const WebSocketProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
@@ -74,6 +88,14 @@ export const WebSocketProvider: React.FC<{ children: ReactNode }> = ({ children 
         if (cbs) {
             cbs.forEach((cb) => cb());
         }
+    }, []);
+
+    // Tofu (2026-10-27): every subscriber once, whatever entities it listens to: the
+    // loaders of the screen that is open (and of the notification bell).
+    const refreshScreen = useCallback(() => {
+        const loaders = new Set<Subscriber>();
+        subscribers.current.forEach((cbs) => cbs.forEach((cb) => loaders.add(cb)));
+        loaders.forEach((cb) => cb());
     }, []);
 
     const clearPing = () => {
@@ -162,6 +184,52 @@ export const WebSocketProvider: React.FC<{ children: ReactNode }> = ({ children 
             }
         };
     }, [user, connect]);
+
+    // Tofu (2026-10-27): the refresh when the page comes back and while it is visible.
+    useEffect(() => {
+        if (!user || IS_DEMO) return;
+
+        let timer: ReturnType<typeof setInterval> | null = null;
+        let lastRefresh = 0;
+
+        const refresh = () => {
+            if (document.visibilityState !== 'visible') return;
+            const now = Date.now();
+            if (now - lastRefresh < REFRESH_MIN_GAP_MS) return;
+            lastRefresh = now;
+            refreshScreen();
+        };
+        const stopTimer = () => {
+            if (timer) {
+                clearInterval(timer);
+                timer = null;
+            }
+        };
+        const startTimer = () => {
+            stopTimer();
+            timer = setInterval(refresh, REFRESH_WHILE_VISIBLE_MS);
+        };
+        const onVisibilityChange = () => {
+            if (document.visibilityState === 'visible') {
+                refresh();
+                startTimer();
+            } else {
+                stopTimer();
+            }
+        };
+
+        document.addEventListener('visibilitychange', onVisibilityChange);
+        window.addEventListener('focus', refresh);
+        window.addEventListener('online', refresh);
+        if (document.visibilityState === 'visible') startTimer();
+
+        return () => {
+            stopTimer();
+            document.removeEventListener('visibilitychange', onVisibilityChange);
+            window.removeEventListener('focus', refresh);
+            window.removeEventListener('online', refresh);
+        };
+    }, [user, refreshScreen]);
 
     const subscribe = useCallback((entity: WsEntity, cb: Subscriber): (() => void) => {
         if (!subscribers.current.has(entity)) {
