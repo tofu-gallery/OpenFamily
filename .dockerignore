@@ -1,0 +1,14 @@
+# Tofu (2026-10-27): this file is Tofu's addition. The root Dockerfile needs the
+# workspaces' sources and manifests only; the rest stays out of the build context.
+.git
+.github
+.githooks
+**/node_modules
+**/dist
+client/android
+docs
+installer
+packaging
+server/uploads
+.env
+.env.*

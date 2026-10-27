@@ -1,3 +1,5 @@
+// Tofu (2026-10-27): modified for Tofu's app gallery: the server listens on PORT
+// when it is set (Tofu's container hosting sets it). See TOFU.md.
 import http from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
 import jwt from 'jsonwebtoken';
@@ -11,7 +13,9 @@ import { getJwtSecret } from './config/loadEnv';
 
 export { broadcast };
 
-const PORT = process.env.SERVER_PORT || 3001;
+// Tofu (2026-10-27): PORT first. Tofu's container hosting sets PORT (80 unless the
+// app sets another) and sends every request there: /api, /ws and the pages.
+const PORT = process.env.PORT || process.env.SERVER_PORT || 3001;
 
 // Create HTTP server
 const server = http.createServer(app);
