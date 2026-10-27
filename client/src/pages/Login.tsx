@@ -1,5 +1,7 @@
-// Tofu (2026-10-27): modified for Tofu's app gallery: a Source code link in the footer. See TOFU.md.
+// Tofu (2026-10-27): modified for Tofu's app gallery: a Source code link in the footer, and a sign-up
+// through an invitation ends on the home page. See TOFU.md.
 import React, { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../contexts/AuthContext';
 import { api } from '../lib/api';
@@ -15,6 +17,7 @@ import { SourceCodeLink } from '../components/app/SourceCodeLink';
 const Login: React.FC = () => {
     const { t } = useTranslation(['auth', 'common', 'nav']);
     const { login, register } = useAuth();
+    const navigate = useNavigate();
     const { actualTheme, setTheme } = useTheme();
     // Whether this server lets anyone sign up. Asked at runtime, so the ready-made
     // images and the Android app follow the server's setting; the build-time flag
@@ -94,6 +97,11 @@ const Login: React.FC = () => {
                 // The account role is decided server-side: invited members get the role
                 // chosen by the inviter; standalone accounts own their family (parent).
                 await register(email, password, name, inviteToken ?? undefined);
+                // Tofu (2026-10-27): the account was made inside the family, so leave the
+                // invitation's address (/join?invite=...). Upstream stayed there, and the join
+                // page then asked about an invitation already used and showed "Unable to
+                // verify the invitation" to the person who had just joined.
+                if (inviteToken) navigate('/', { replace: true });
             }
         } catch (err: unknown) {
             setError(err instanceof Error ? err.message : t('common:states.error'));
