@@ -1,3 +1,4 @@
+// Tofu (2026-10-27): modified for Tofu's app gallery: the shared accounts list fits a phone's width. See TOFU.md.
 import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useWebSocketUpdates } from '../hooks/useWebSocketUpdates';
@@ -558,17 +559,21 @@ const Family: React.FC = () => {
 
                         {/* Account list */}
                         {sharedAccounts.length > 1 && (
-                            <div className="grid gap-3">
+                            // Tofu (2026-10-27): one column that never grows past the page, and a row whose
+                            // role picker and buttons wrap under the name on a phone. Upstream's row could not
+                            // wrap, and on a 390-pixel phone it made the whole page scroll sideways as soon as
+                            // the family had a second account.
+                            <div className="grid grid-cols-1 gap-3">
                                 {sharedAccounts.map((account) => (
                                     <Card key={account.id} hover={false}>
-                                        <CardContent className="flex items-center gap-3 p-4">
+                                        <CardContent className="flex flex-wrap items-center gap-3 p-4">
                                             <div className="w-10 h-10 rounded-full bg-nexus-blue/10 flex items-center justify-center shrink-0">
                                                 {account.is_owner
                                                     ? <Crown className="w-5 h-5 text-nexus-blue" />
                                                     : <User className="w-5 h-5 text-muted-foreground" />
                                                 }
                                             </div>
-                                            <div className="flex-1 min-w-0">
+                                            <div className="flex-1 min-w-[8rem]">
                                                 <p className="text-body font-medium truncate">
                                                     {account.name}
                                                     {account.id === user?.id && (
