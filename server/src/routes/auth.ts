@@ -1,3 +1,4 @@
+// Tofu (2026-10-27): modified for Tofu's app gallery: new accounts default to English and US dollars. See TOFU.md.
 import crypto from 'node:crypto';
 import { Router } from 'express';
 import bcrypt from 'bcrypt';
@@ -34,6 +35,10 @@ router.get('/me', authMiddleware, async (req: AuthRequest, res) => {
 });
 
 const registrationOpen = (): boolean => process.env.REGISTRATION_ENABLED !== 'false';
+
+// Tofu (2026-10-27): a new account takes the browser's language when the app
+// speaks it, else English (upstream: the column's default, French).
+const ACCOUNT_LANGUAGES = ['en', 'fr', 'pt', 'ru', 'zh', 'es', 'de'];
 
 // Whether anyone can create an account, read by the login page to show or hide
 // "Sign up". No session: it is the first thing an unauthenticated app asks.
@@ -108,8 +113,8 @@ router.post('/register', async (req, res) => {
 
         // Create user
         const result = await query(
-            'INSERT INTO users (email, password_hash, name, role) VALUES ($1, $2, $3, $4) RETURNING id, email, name, role, currency, language, week_start_day, avatar_url',
-            [normalizedEmail, password_hash, cleanedName, cleanedRole]
+            'INSERT INTO users (email, password_hash, name, role, language) VALUES ($1, $2, $3, $4, $5) RETURNING id, email, name, role, currency, language, week_start_day, avatar_url',
+            [normalizedEmail, password_hash, cleanedName, cleanedRole, req.acceptsLanguages(ACCOUNT_LANGUAGES) || 'en']
         );
 
         const user = result.rows[0];
@@ -132,7 +137,7 @@ router.post('/register', async (req, res) => {
             disabled_modules = parseDisabledModules(ownerModules.rows[0]?.disabled_modules);
         }
 
-        res.json({ success: true, data: { user: { ...user, is_owner: isOwner, role: user.role, currency: user.currency || 'EUR', disabled_modules }, token } });
+        res.json({ success: true, data: { user: { ...user, is_owner: isOwner, role: user.role, currency: user.currency || 'USD', disabled_modules }, token } });
     } catch (error) {
         console.error('Register error:', error);
         res.status(500).json({ success: false, error: 'Internal server error' });
@@ -177,7 +182,7 @@ router.post('/login', async (req, res) => {
         res.json({
             success: true,
             data: {
-                user: { id: user.id, email: user.email, name: user.name, role: user.role, is_owner: isOwner, currency: user.currency || 'EUR', language: user.language || 'fr', week_start_day: user.week_start_day ?? null, avatar_url: user.avatar_url ?? null, disabled_modules },
+                user: { id: user.id, email: user.email, name: user.name, role: user.role, is_owner: isOwner, currency: user.currency || 'USD', language: user.language || 'en', week_start_day: user.week_start_day ?? null, avatar_url: user.avatar_url ?? null, disabled_modules },
                 token
             }
         });
@@ -327,7 +332,7 @@ router.post('/refresh', authMiddleware, async (req: AuthRequest, res) => {
             success: true,
             data: {
                 token,
-                user: { id: user.id, email: user.email, name: user.name, role: user.role, is_owner: isOwner, currency: user.currency || 'EUR', language: user.language || 'fr', week_start_day: user.week_start_day ?? null, avatar_url: user.avatar_url ?? null, disabled_modules },
+                user: { id: user.id, email: user.email, name: user.name, role: user.role, is_owner: isOwner, currency: user.currency || 'USD', language: user.language || 'en', week_start_day: user.week_start_day ?? null, avatar_url: user.avatar_url ?? null, disabled_modules },
             },
         });
     } catch (error) {

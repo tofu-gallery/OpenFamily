@@ -1,3 +1,4 @@
+// Tofu (2026-10-27): modified for Tofu's app gallery: US dollars when no currency is given. See TOFU.md.
 import { type ClassValue, clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { intlLocale, formatTime as formatClockTime } from '../i18n/format';
@@ -19,7 +20,7 @@ export function formatTime(date: Date | string): string {
     return formatClockTime(date);
 }
 
-export function formatCurrency(amount: number, currency: string = 'EUR'): string {
+export function formatCurrency(amount: number, currency: string = 'USD'): string {
     return new Intl.NumberFormat(intlLocale(), {
         style: 'currency',
         currency: currency.toUpperCase()

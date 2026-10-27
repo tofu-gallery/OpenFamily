@@ -1,3 +1,4 @@
+// Tofu (2026-10-27): modified for Tofu's app gallery: the calendar feed names a time zone only when TZ is set. See TOFU.md.
 import crypto from 'node:crypto';
 import { Router } from 'express';
 import { query } from '../db';
@@ -51,7 +52,10 @@ const buildICS = (appointments: any[]): string => {
         'CALSCALE:GREGORIAN',
         'METHOD:PUBLISH',
         'X-WR-CALNAME:OpenFamily',
-        'X-WR-TIMEZONE:Europe/Paris',
+        // Tofu (2026-10-27): the times below are floating (the family's own clock
+        // time). Upstream named Europe/Paris as their zone, which moves them for a
+        // family anywhere else; the zone is named only when TZ is set.
+        ...(process.env.TZ ? [`X-WR-TIMEZONE:${process.env.TZ}`] : []),
     ];
 
     const stamp = formatICSDate(new Date());

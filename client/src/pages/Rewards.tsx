@@ -1,3 +1,4 @@
+// Tofu (2026-10-27): modified for Tofu's app gallery: US dollars when no currency is saved. See TOFU.md.
 import React, { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
@@ -162,7 +163,7 @@ const Rewards: React.FC = () => {
     useWebSocketUpdates('rewards', () => void load());
     useWebSocketUpdates('tasks', () => void load());
 
-    const currency = summary?.currency || user?.currency || 'EUR';
+    const currency = summary?.currency || user?.currency || 'USD';
     const pointsValue = summary?.points_value ?? 0.1;
 
     // Show every member with reward activity, plus all children (the target

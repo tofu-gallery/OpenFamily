@@ -1,3 +1,4 @@
+// Tofu (2026-10-27): modified for Tofu's app gallery: UTC and English when no time zone or language is set; on Tofu these reminders cannot be relied on (TOFU.md). See TOFU.md.
 import cron from 'node-cron';
 import { format } from 'date-fns';
 import { query } from '../db';
@@ -81,7 +82,7 @@ export function buildReminderTexts(
 ): { title: string; body: string } {
     const lang = (LANGUAGES as string[]).includes(occurrence.language)
         ? occurrence.language as ReminderLanguage
-        : 'fr';
+        : 'en';
     const start = String(occurrence.start_time);
     const where = occurrence.location ? ` · ${occurrence.location}` : '';
     const body = occurrence.is_all_day
@@ -114,7 +115,7 @@ async function checkReminders(): Promise<void> {
         const { rows } = await query(
             `SELECT a.id, a.user_id, a.title, a.start_time, a.end_time, a.location, a.is_all_day,
                     a.reminder_minutes, a.recurrence_frequency, a.recurrence_interval, a.recurrence_until,
-                    COALESCE(u.language, 'fr') AS language
+                    COALESCE(u.language, 'en') AS language
              FROM appointments a
              JOIN users u ON u.id = a.user_id
              WHERE a.start_time <= $2
@@ -203,7 +204,7 @@ async function pruneReminderLog(): Promise<void> {
 }
 
 export function startReminderScheduler(): void {
-    const tz = process.env.TZ ?? 'Europe/Paris';
+    const tz = process.env.TZ || 'UTC';
 
     // Run every minute
     cron.schedule('* * * * *', () => {

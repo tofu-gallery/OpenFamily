@@ -1,3 +1,4 @@
+// Tofu (2026-10-27): modified for Tofu's app gallery: UTC and English when no time zone or language is set. See TOFU.md.
 /**
  * Outside calendars in OpenFamily: a one-off .ics file import, and calendars
  * followed by address (Google Calendar's secret iCal address, Outlook, Apple,
@@ -35,13 +36,16 @@ export class CalendarSourceError extends Error {
 }
 
 /** The family's zone: the one the server runs in, as for reminders. */
-export const familyTimeZone = (): string => process.env.TZ || 'Europe/Paris';
+// Tofu (2026-10-27): UTC when TZ is unset (upstream: Europe/Paris). The owner sets
+// TZ to the family's zone (for example America/New_York) to import dated events
+// at their local times.
+export const familyTimeZone = (): string => process.env.TZ || 'UTC';
 
 const UNTITLED: Record<string, string> = {
     fr: 'Sans titre', en: 'Untitled', pt: 'Sem título', ru: 'Без названия', es: 'Sin título', zh: '无标题', de: 'Ohne Titel',
 };
 export const untitledFor = (language: unknown): string =>
-    UNTITLED[String(language ?? '').slice(0, 2)] ?? UNTITLED.fr;
+    UNTITLED[String(language ?? '').slice(0, 2)] ?? UNTITLED.en;
 
 /** "webcal://" is how calendar sites offer subscriptions; it is plain https. */
 export function normalizeCalendarUrl(raw: unknown): URL {
@@ -216,7 +220,7 @@ export async function syncSubscription(subscriptionId: string): Promise<StoreRes
     syncing.add(subscriptionId);
     try {
         const found = await query(
-            `SELECT s.*, COALESCE(u.language, 'fr') AS language
+            `SELECT s.*, COALESCE(u.language, 'en') AS language
              FROM calendar_subscriptions s JOIN users u ON u.id = s.user_id
              WHERE s.id = $1`,
             [subscriptionId]

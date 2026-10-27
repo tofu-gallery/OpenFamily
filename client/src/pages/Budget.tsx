@@ -1,3 +1,4 @@
+// Tofu (2026-10-27): modified for Tofu's app gallery: US dollars when no currency is saved. See TOFU.md.
 import React, { useEffect, useState, useCallback } from 'react';
 import { useWebSocketUpdates } from '../hooks/useWebSocketUpdates';
 import { api } from '../lib/api';
@@ -188,7 +189,7 @@ const Budget: React.FC = () => {
     const { t } = useTranslation(['budget', 'kakeibo', 'common']);
     const categoryLabel = (v: string) => t(`budget:categories.${v}`, { defaultValue: v });
     const { user } = useAuth();
-    const currency = user?.currency || 'EUR';
+    const currency = user?.currency || 'USD';
     const canEdit = Boolean(user?.is_owner) || (user?.role ?? '').toLowerCase() !== 'enfant';
 
     // Classic budget, analytics, or kakeibo. Persisted per browser so the choice sticks.

@@ -1,3 +1,4 @@
+// Tofu (2026-10-27): modified for Tofu's app gallery: English when an account has no language. See TOFU.md.
 import { query } from '../db';
 import { sendPushToUser } from './pushService';
 import { broadcast } from './broadcaster';
@@ -25,7 +26,7 @@ export type LocalizedTexts = Record<NotificationLanguage, { title: string; messa
 export async function createLocalizedNotification(
     input: Omit<CreateNotificationInput, 'title' | 'message'> & { texts: LocalizedTexts }
 ): Promise<void> {
-    let lang: NotificationLanguage = 'fr';
+    let lang: NotificationLanguage = 'en';
     try {
         const result = await query('SELECT language FROM users WHERE id = $1', [input.userId]);
         const saved = String(result.rows[0]?.language ?? '').toLowerCase().split(/[-_]/)[0];

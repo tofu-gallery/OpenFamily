@@ -1,3 +1,4 @@
+// Tofu (2026-10-27): modified for Tofu's app gallery: English when an account has no language. See TOFU.md.
 import express, { Router } from 'express';
 import { getClient, query } from '../db';
 import { authMiddleware, requireParent, AuthRequest } from '../middleware/auth';
@@ -63,7 +64,7 @@ const publicSubscription = (row: any) => ({
 
 const userLanguage = async (req: AuthRequest) => {
     const r = await query('SELECT language FROM users WHERE id = $1', [req.actualUserId ?? req.userId]);
-    return r.rows[0]?.language ?? 'fr';
+    return r.rows[0]?.language ?? 'en';
 };
 
 // ─── one-off .ics file import ───────────────────────────────────────────────

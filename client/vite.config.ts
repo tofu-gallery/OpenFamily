@@ -1,3 +1,4 @@
+// Tofu (2026-10-27): modified for Tofu's app gallery: the web app's manifest describes it in English. See TOFU.md.
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { VitePWA } from 'vite-plugin-pwa';
@@ -28,7 +29,8 @@ export default defineConfig(({ mode }) => {
                 manifest: {
                     name: 'OpenFamily',
                     short_name: 'OpenFamily',
-                    description: 'Application de gestion familiale',
+                    // Tofu (2026-10-27): English (upstream: French).
+                    description: 'Family organizer',
                     theme_color: '#DC4A60',
                     background_color: '#F7F2E9',
                     display: 'standalone',

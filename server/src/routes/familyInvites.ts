@@ -1,3 +1,4 @@
+// Tofu (2026-10-27): modified for Tofu's app gallery: the currency shown when none is saved is US dollars. See TOFU.md.
 import crypto from 'node:crypto';
 import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
@@ -391,7 +392,7 @@ router.post('/transfer-ownership', async (req: AuthRequest, res) => {
                 email: user.email,
                 role: user.role,
                 is_owner: false,
-                currency: user.currency || 'EUR',
+                currency: user.currency || 'USD',
             },
         },
     });

@@ -1,3 +1,4 @@
+// Tofu (2026-10-27): modified for Tofu's app gallery: the currency shown when none is saved is US dollars. See TOFU.md.
 import { Router } from 'express';
 import { query } from '../db';
 import { authMiddleware, AuthRequest, isParentAccount, requireParent } from '../middleware/auth';
@@ -85,7 +86,7 @@ router.get('/summary', async (req: AuthRequest, res) => {
         ]);
 
         const pointsValue = await getPointsValue(userId);
-        const currency = ownerResult.rows[0]?.currency || 'EUR';
+        const currency = ownerResult.rows[0]?.currency || 'USD';
 
         const balanceByMember = new Map<string, { balance: number; txCount: number }>(
             balancesResult.rows.map((r: any) => [r.member_id, { balance: parseInt(r.balance, 10) || 0, txCount: parseInt(r.tx_count, 10) || 0 }])

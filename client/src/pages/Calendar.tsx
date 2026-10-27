@@ -1,3 +1,4 @@
+// Tofu (2026-10-27): modified for Tofu's app gallery: US dollars when no currency is saved. See TOFU.md.
 import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useWebSocketUpdates } from '../hooks/useWebSocketUpdates';
@@ -160,7 +161,7 @@ const Calendar: React.FC = () => {
     const { categories } = useCategories();
     // Budget writes are parent-only on the server; children never see the option.
     const canBudgetEdit = Boolean(user?.is_owner) || (user?.role ?? '').toLowerCase() !== 'enfant';
-    const currency = user?.currency || 'EUR';
+    const currency = user?.currency || 'USD';
     const [addToBudget, setAddToBudget] = useState(false);
     const [budgetAmount, setBudgetAmount] = useState('');
     const [budgetCategory, setBudgetCategory] = useState('Maison');

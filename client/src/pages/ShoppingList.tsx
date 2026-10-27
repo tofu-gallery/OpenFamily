@@ -1,3 +1,4 @@
+// Tofu (2026-10-27): modified for Tofu's app gallery: US dollars when no currency is saved. See TOFU.md.
 import React, { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useWebSocketUpdates } from '../hooks/useWebSocketUpdates';
@@ -55,7 +56,7 @@ const ShoppingList: React.FC = () => {
     const { t } = useTranslation(['shopping', 'common']);
     const categoryLabel = (value: string) => t(`shopping:categories.${value}`, { defaultValue: value });
     const { user } = useAuth();
-    const currency = user?.currency || 'EUR';
+    const currency = user?.currency || 'USD';
     // Family-customizable category list (Settings → Categories).
     const { categories: familyCategories } = useCategories();
     const categories = familyCategories.shopping;

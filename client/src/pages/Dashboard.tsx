@@ -1,3 +1,4 @@
+// Tofu (2026-10-27): modified for Tofu's app gallery: US dollars when no currency is saved. See TOFU.md.
 import React, { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useWebSocketUpdates } from '../hooks/useWebSocketUpdates';
@@ -63,7 +64,7 @@ interface LatestFamilyPost {
 const Dashboard: React.FC = () => {
     const { t } = useTranslation(['dashboard', 'common', 'notes']);
     const { user, isModuleEnabled, dashboardPrefs, updateDashboardPrefs } = useAuth();
-    const currency = user?.currency || 'EUR';
+    const currency = user?.currency || 'USD';
     const [stats, setStats] = useState<DashboardStats | null>(null);
     const [appointments, setAppointments] = useState<Appointment[]>([]);
     const [planning, setPlanning] = useState<PlanningEntry[]>([]);

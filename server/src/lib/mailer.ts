@@ -1,3 +1,4 @@
+// Tofu (2026-10-27): modified for Tofu's app gallery: English when an account has no language. See TOFU.md.
 import nodemailer, { type Transporter } from 'nodemailer';
 import logger from './logger';
 
@@ -58,7 +59,8 @@ const normalizeLanguage = (language?: string | null): Language => {
     if (normalized.startsWith('es')) return 'es';
     if (normalized.startsWith('zh')) return 'zh';
     if (normalized.startsWith('de')) return 'de';
-    return 'fr';
+    if (normalized.startsWith('fr')) return 'fr';
+    return 'en';
 };
 
 /** Escape characters that would break out of HTML text nodes or attributes. */
