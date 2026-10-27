@@ -130,10 +130,12 @@ const MIGRATION_LOCK = "hashtext('openfamily.migrations')";
 // the whole schema step (the historical list, the versioned migrations, row-level
 // security and a record of what was done) runs in ONE transaction that first
 // takes the transaction-level lock: one start does it, the others wait for the
-// lock and then find it done. A start whose code finds its own record and no
-// table left open skips the step without taking the lock.
+// lock and then find it done. A start first tries the lock, so the log says
+// when it waits, then waits in Postgres itself (lock_timeout bounds it), so the
+// waiting starts go on one after another as soon as the lock is free. A start
+// whose code finds its own record and no table left open skips the step without
+// taking the lock.
 const SCHEMA_LOCK_WAIT_MS = 120_000;
-const SCHEMA_LOCK_POLL_MS = 250;
 
 // The one row that says which code made this schema: a hash of every statement
 // the step runs. The table is Tofu's; upstream's code ignores it.
@@ -191,7 +193,6 @@ const schemaIsCurrent = async (run: RunQuery, fingerprint: string): Promise<bool
     return Number(open.rows[0]?.open_tables ?? 0) === 0;
 };
 
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export const runMigrations = async () => {
     // The historical list below is idempotent and runs on every start, as it
@@ -731,8 +732,8 @@ export const runMigrations = async () => {
         // End of the historical list. New migrations: migrations/registry.ts.
     ];
 
-    // Tofu (2026-10-27): one transaction under pg_try_advisory_xact_lock instead
-    // of a session-level pg_advisory_lock; see SCHEMA_LOCK_WAIT_MS above.
+    // Tofu (2026-10-27): one transaction under the transaction-level advisory
+    // lock instead of a session-level pg_advisory_lock; see SCHEMA_LOCK_WAIT_MS above.
     const fingerprint = schemaFingerprint(migrations);
     if (await schemaIsCurrent((text) => pool.query(text), fingerprint)) {
         logger.info('db.migrations_current', { fingerprint: fingerprint.slice(0, 12) });
@@ -740,65 +741,54 @@ export const runMigrations = async () => {
     }
 
     const startedAt = Date.now();
-    let waiting = false;
-    for (;;) {
-        const client: PoolClient = await pool.connect();
-        try {
-            await client.query('BEGIN');
-            const lock = await client.query(`SELECT pg_try_advisory_xact_lock(${MIGRATION_LOCK}) AS locked`);
-            if (!lock.rows[0]?.locked) {
-                await client.query('ROLLBACK');
-                if (!waiting) {
-                    waiting = true;
-                    logger.info('db.migrations_waiting', { reason: 'another start holds the schema lock' });
-                }
-                if (Date.now() - startedAt > SCHEMA_LOCK_WAIT_MS) {
-                    throw new Error('Timed out waiting for another start of the app to finish the schema');
-                }
-                await sleep(SCHEMA_LOCK_POLL_MS);
-                continue;
-            }
-
-            if (await schemaIsCurrent((text) => client.query(text), fingerprint)) {
-                await client.query('COMMIT');
-                logger.info('db.migrations_done_by_another_start', { waitedMs: Date.now() - startedAt });
-                return;
-            }
-
-            for (const migration of migrations) {
-                await client.query(migration);
-            }
-            const report = await runVersionedMigrations(client, [...coreMigrations, ...tofuMigrations], { inTransaction: true });
-            if (report.unknown.length > 0) {
-                // A newer OpenFamily ran against this database before this one.
-                // Its tables are still there; say so rather than refuse to start.
-                logger.warn('db.migrations_unknown', { ids: report.unknown });
-            }
-            await client.query(`CREATE TABLE IF NOT EXISTS ${SCHEMA_STATE_TABLE} (
-                id SMALLINT PRIMARY KEY CHECK (id = 1),
-                fingerprint CHAR(64) NOT NULL,
-                updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-            )`);
-            await client.query(ENABLE_ROW_LEVEL_SECURITY);
-            await client.query(
-                `INSERT INTO ${SCHEMA_STATE_TABLE} (id, fingerprint) VALUES (1, $1)
-                 ON CONFLICT (id) DO UPDATE SET fingerprint = EXCLUDED.fingerprint, updated_at = now()`,
-                [fingerprint]
-            );
-            await client.query('COMMIT');
-            logger.info('db.migrations_complete', {
-                historical: migrations.length,
-                applied: report.applied,
-                alreadyApplied: report.alreadyApplied,
-                waitedMs: Date.now() - startedAt,
-            });
-            return;
-        } catch (error) {
-            await client.query('ROLLBACK').catch(() => {});
-            throw error;
-        } finally {
-            client.release();
+    const client: PoolClient = await pool.connect();
+    try {
+        await client.query('BEGIN');
+        const lock = await client.query(`SELECT pg_try_advisory_xact_lock(${MIGRATION_LOCK}) AS locked`);
+        if (!lock.rows[0]?.locked) {
+            logger.info('db.migrations_waiting', { reason: 'another start holds the schema lock' });
+            await client.query(`SET LOCAL lock_timeout = '${SCHEMA_LOCK_WAIT_MS}ms'`);
+            await client.query(`SELECT pg_advisory_xact_lock(${MIGRATION_LOCK})`);
         }
+
+        if (await schemaIsCurrent((text) => client.query(text), fingerprint)) {
+            await client.query('COMMIT');
+            logger.info('db.migrations_done_by_another_start', { waitedMs: Date.now() - startedAt });
+            return;
+        }
+
+        for (const migration of migrations) {
+            await client.query(migration);
+        }
+        const report = await runVersionedMigrations(client, [...coreMigrations, ...tofuMigrations], { inTransaction: true });
+        if (report.unknown.length > 0) {
+            // A newer OpenFamily ran against this database before this one.
+            // Its tables are still there; say so rather than refuse to start.
+            logger.warn('db.migrations_unknown', { ids: report.unknown });
+        }
+        await client.query(`CREATE TABLE IF NOT EXISTS ${SCHEMA_STATE_TABLE} (
+            id SMALLINT PRIMARY KEY CHECK (id = 1),
+            fingerprint CHAR(64) NOT NULL,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )`);
+        await client.query(ENABLE_ROW_LEVEL_SECURITY);
+        await client.query(
+            `INSERT INTO ${SCHEMA_STATE_TABLE} (id, fingerprint) VALUES (1, $1)
+             ON CONFLICT (id) DO UPDATE SET fingerprint = EXCLUDED.fingerprint, updated_at = now()`,
+            [fingerprint]
+        );
+        await client.query('COMMIT');
+        logger.info('db.migrations_complete', {
+            historical: migrations.length,
+            applied: report.applied,
+            alreadyApplied: report.alreadyApplied,
+            waitedMs: Date.now() - startedAt,
+        });
+    } catch (error) {
+        await client.query('ROLLBACK').catch(() => {});
+        throw error;
+    } finally {
+        client.release();
     }
 };
 
