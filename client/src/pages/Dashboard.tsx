@@ -1,5 +1,6 @@
 // Tofu (2026-10-27): modified for Tofu's app gallery: US dollars when no currency is saved, and one
-// subscription for the entities that reload everything, so a refresh runs that loader once. See TOFU.md.
+// subscription for the entities that reload everything, so a refresh runs that loader once and not
+// the three loaders it already calls. See TOFU.md.
 import React, { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useWebSocketUpdates } from '../hooks/useWebSocketUpdates';
@@ -88,9 +89,10 @@ const Dashboard: React.FC = () => {
 
     useEffect(() => { void loadAll(); }, [agendaView]);
     useWebSocketUpdates(['tasks', 'shopping', 'appointments', 'budget'], () => { void loadAll(); });
-    useWebSocketUpdates('planning', () => { void loadPlanning(); });
-    useWebSocketUpdates('notes', () => { void loadNotes(); });
-    useWebSocketUpdates('posts', () => { void loadLatestPost(); });
+    // loadAll asks for these three too, so the screen's refresh leaves them out (Tofu).
+    useWebSocketUpdates('planning', () => { void loadPlanning(); }, { refresh: false });
+    useWebSocketUpdates('notes', () => { void loadNotes(); }, { refresh: false });
+    useWebSocketUpdates('posts', () => { void loadLatestPost(); }, { refresh: false });
 
     const loadLatestPost = async () => {
         try {

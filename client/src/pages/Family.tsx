@@ -1,5 +1,6 @@
-// Tofu (2026-10-27): modified for Tofu's app gallery: the shared accounts list fits a phone's width. See TOFU.md.
-import React, { useEffect, useState } from 'react';
+// Tofu (2026-10-27): modified for Tofu's app gallery: the shared accounts list fits a phone's width,
+// and an approved join request renews the session once, not on every refresh. See TOFU.md.
+import React, { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useWebSocketUpdates } from '../hooks/useWebSocketUpdates';
 import { useAuth } from '../contexts/AuthContext';
@@ -139,6 +140,11 @@ const Family: React.FC = () => {
         }
     };
 
+    // Tofu (2026-10-27): a join request stays "approved" after it was used, and the screen's
+    // refresh asks for it every 15 seconds: act on an approval once, since each time renews
+    // the session's token and so reconnects the live updates.
+    const approvalHandled = useRef<string | null>(null);
+
     const loadJoinData = async () => {
         // Owner: pending requests addressed to me (403 for non-owners, ignore)
         try {
@@ -153,9 +159,12 @@ const Family: React.FC = () => {
             if (mineRes.success) {
                 if (mineRes.data?.status === 'approved') {
                     // Access granted: refresh the token so data queries use the new family scope
-                    await refreshToken();
-                    await loadSharedAccounts();
-                    await loadMembers();
+                    if (approvalHandled.current !== mineRes.data.id) {
+                        approvalHandled.current = mineRes.data.id;
+                        await refreshToken();
+                        await loadSharedAccounts();
+                        await loadMembers();
+                    }
                     setMyRequest(null);
                 } else {
                     setMyRequest(mineRes.data);

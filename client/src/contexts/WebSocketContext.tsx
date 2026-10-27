@@ -42,8 +42,12 @@ export interface WsUpdateMessage {
 type Subscriber = () => void;
 
 interface WebSocketContextType {
-    /** Subscribe to updates for a given entity. Returns an unsubscribe function. */
-    subscribe: (entity: WsEntity, cb: Subscriber) => () => void;
+    /**
+     * Subscribe to updates for a given entity. Returns an unsubscribe function.
+     * `refresh: false` (Tofu): socket updates only, for a loader that the screen's refresh
+     * already runs through another subscription.
+     */
+    subscribe: (entity: WsEntity, cb: Subscriber, options?: { refresh?: boolean }) => () => void;
 }
 
 // ─── Context ──────────────────────────────────────────────────────────────────
@@ -75,6 +79,8 @@ export const WebSocketProvider: React.FC<{ children: ReactNode }> = ({ children 
 
     // Map entity → set of subscriber callbacks
     const subscribers = useRef<Map<WsEntity, Set<Subscriber>>>(new Map());
+    // Tofu (2026-10-27): the subscribers the screen's refresh leaves out.
+    const notRefreshed = useRef<WeakSet<Subscriber>>(new WeakSet());
 
     const wsRef = useRef<WebSocket | null>(null);
     const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -94,7 +100,9 @@ export const WebSocketProvider: React.FC<{ children: ReactNode }> = ({ children 
     // loaders of the screen that is open (and of the notification bell).
     const refreshScreen = useCallback(() => {
         const loaders = new Set<Subscriber>();
-        subscribers.current.forEach((cbs) => cbs.forEach((cb) => loaders.add(cb)));
+        subscribers.current.forEach((cbs) => cbs.forEach((cb) => {
+            if (!notRefreshed.current.has(cb)) loaders.add(cb);
+        }));
         loaders.forEach((cb) => cb());
     }, []);
 
@@ -192,12 +200,20 @@ export const WebSocketProvider: React.FC<{ children: ReactNode }> = ({ children 
         let timer: ReturnType<typeof setInterval> | null = null;
         let lastRefresh = 0;
 
+        // Offline, nothing is asked (a failed load would leave its error on screen); coming
+        // back online refreshes.
         const refresh = () => {
-            if (document.visibilityState !== 'visible') return;
+            if (document.visibilityState !== 'visible' || !navigator.onLine) return;
             const now = Date.now();
             if (now - lastRefresh < REFRESH_MIN_GAP_MS) return;
             lastRefresh = now;
             refreshScreen();
+        };
+        // A timed refresh waits while a request is still on its way (a slow connection, a
+        // copy still starting), so that requests never pile up.
+        const refreshOnTimer = () => {
+            if (api.isBusy()) return;
+            refresh();
         };
         const stopTimer = () => {
             if (timer) {
@@ -207,7 +223,7 @@ export const WebSocketProvider: React.FC<{ children: ReactNode }> = ({ children 
         };
         const startTimer = () => {
             stopTimer();
-            timer = setInterval(refresh, REFRESH_WHILE_VISIBLE_MS);
+            timer = setInterval(refreshOnTimer, REFRESH_WHILE_VISIBLE_MS);
         };
         const onVisibilityChange = () => {
             if (document.visibilityState === 'visible') {
@@ -231,11 +247,12 @@ export const WebSocketProvider: React.FC<{ children: ReactNode }> = ({ children 
         };
     }, [user, refreshScreen]);
 
-    const subscribe = useCallback((entity: WsEntity, cb: Subscriber): (() => void) => {
+    const subscribe = useCallback((entity: WsEntity, cb: Subscriber, options?: { refresh?: boolean }): (() => void) => {
         if (!subscribers.current.has(entity)) {
             subscribers.current.set(entity, new Set());
         }
         subscribers.current.get(entity)!.add(cb);
+        if (options?.refresh === false) notRefreshed.current.add(cb);
 
         return () => {
             subscribers.current.get(entity)?.delete(cb);

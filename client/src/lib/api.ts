@@ -1,3 +1,6 @@
+// Tofu (2026-10-27): modified for Tofu's app gallery: requests on their way and changes sent
+// are counted for the screen's refresh (WebSocketContext), and a read that crossed one of this
+// page's own changes is asked again. See TOFU.md.
 // The API base URL is resolved at request time by `apiBase()`:
 //  - web: same-origin in prod ('' ), localhost:3001 in dev (see serverConfig);
 //  - native (Capacitor): the server URL the user configured on the device.
@@ -9,6 +12,10 @@ const AUTH_EXPIRED_EVENT = 'openfamily:auth-expired';
 
 class ApiClient {
     private token: string | null = null;
+    // Tofu (2026-10-27): requests that have not answered yet, and changes (anything but a
+    // GET) that have.
+    private pending = 0;
+    private changesDone = 0;
 
     constructor() {
         this.token = localStorage.getItem('token');
@@ -25,6 +32,11 @@ class ApiClient {
 
     getToken(): string | null {
         return this.token;
+    }
+
+    /** Tofu (2026-10-27): a request this page made has not answered yet. */
+    isBusy(): boolean {
+        return this.pending > 0;
     }
 
     private async request<T>(
@@ -46,12 +58,17 @@ class ApiClient {
             headers['Authorization'] = `Bearer ${this.token}`;
         }
 
+        const isChange = (options.method ?? 'GET') !== 'GET';
+        this.pending += 1;
         const response = await fetch(`${apiBase()}${endpoint}`, {
             ...options,
             headers: {
                 ...headers,
                 ...(options.headers as Record<string, string>),
             },
+        }).finally(() => {
+            this.pending -= 1;
+            if (isChange) this.changesDone += 1;
         });
 
         const contentType = response.headers.get('content-type') || '';
@@ -76,6 +93,12 @@ class ApiClient {
     }
 
     async get<T>(endpoint: string): Promise<T> {
+        // Tofu (2026-10-27): a read that was on its way while one of this page's own changes
+        // went through may carry the state from before it, and putting that on screen would
+        // undo the change there (a ticked item unticked) until the next refresh: ask again.
+        const changesBefore = this.changesDone;
+        const data = await this.request<T>(endpoint, { method: 'GET' });
+        if (this.changesDone === changesBefore) return data;
         return this.request<T>(endpoint, { method: 'GET' });
     }
 
