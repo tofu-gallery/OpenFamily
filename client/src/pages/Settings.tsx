@@ -1,8 +1,9 @@
+// Tofu (2026-10-27): modified for Tofu's app gallery: the support card links this copy's source. See TOFU.md.
 import React, { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { api } from '../lib/api';
-import { Download, Upload, CheckCircle, AlertCircle, Loader2, Bell, BellOff, Globe, Languages, Camera, Trash2, MonitorPlay, Sparkles, LayoutGrid, Server, Tags, ArrowUp, ArrowDown, Plus, Heart, Star } from 'lucide-react';
+import { Download, Upload, CheckCircle, AlertCircle, Loader2, Bell, BellOff, Globe, Languages, Camera, Trash2, MonitorPlay, Sparkles, LayoutGrid, Server, Tags, ArrowUp, ArrowDown, Plus, Heart, Code } from 'lucide-react';
 import { Card, CardContent, Button, Input, Select } from '../components/ui';
 import { LanguageSwitcher } from '../components/ui/LanguageSwitcher';
 import RegionalPreferences from '../components/app/RegionalPreferences';
@@ -12,6 +13,7 @@ import { isNative, getServerUrl, clearServerUrl } from '../lib/serverConfig';
 import { useCategories, CATEGORY_MODULES, type CategoryModule } from '../hooks/useCategories';
 import { refreshAiStatus } from '../lib/aiStatus';
 import { aiErrorKey } from '../components/app/MagicInput';
+import { SourceCodeLink } from '../components/app/SourceCodeLink';
 
 interface ImportCounts {
     family_settings?: number;
@@ -1223,15 +1225,13 @@ const Settings: React.FC = () => {
                                     <Heart className="h-4 w-4" />
                                     {t('settings:support.sponsor')}
                                 </a>
-                                <a
-                                    href="https://github.com/NexaFlowFrance/OpenFamily"
-                                    target="_blank"
-                                    rel="noopener noreferrer"
+                                {/* Tofu (2026-10-27): this copy's own source (AGPL-3.0, section 13), where upstream linked its repository. */}
+                                <SourceCodeLink
                                     className="inline-flex h-9 items-center gap-2 rounded-input border border-border bg-card px-3 text-caption font-medium text-foreground hover:bg-surface-2 transition-colors duration-fast"
                                 >
-                                    <Star className="h-4 w-4" />
-                                    {t('settings:support.star')}
-                                </a>
+                                    <Code className="h-4 w-4" />
+                                    {t('auth:sourceCode')}
+                                </SourceCodeLink>
                             </div>
                         </div>
                     </div>

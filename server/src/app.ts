@@ -1,3 +1,4 @@
+// Tofu (2026-10-27): modified for Tofu's app gallery: GET /api/source names the code's source. See TOFU.md.
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -143,6 +144,16 @@ app.use((req, res, next) => {
 // Health check
 app.get('/health', (req, res) => {
     res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+// Tofu (2026-10-27): where the source of the code this server runs is published
+// (AGPL-3.0, section 13). The sign-in page and Settings link to it. SOURCE_URL is
+// a public setting the app gallery saves as the copy's exact pinned commit;
+// without it, the fork's tofu branch.
+const SOURCE_FALLBACK = 'https://github.com/tofu-gallery/OpenFamily/tree/tofu';
+app.get('/api/source', (_req, res) => {
+    const configured = process.env.SOURCE_URL?.trim() || '';
+    res.json({ success: true, data: { url: /^https?:\/\//i.test(configured) ? configured : SOURCE_FALLBACK } });
 });
 
 // Android App Links verification: lets https://<your-domain>/join?invite=... open

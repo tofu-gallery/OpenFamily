@@ -1,3 +1,4 @@
+// Tofu (2026-10-27): modified for Tofu's app gallery: a Source code link in the footer. See TOFU.md.
 import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../contexts/AuthContext';
@@ -8,6 +9,7 @@ import { Input } from '../components/ui/Input';
 import { LanguageSwitcher } from '../components/ui/LanguageSwitcher';
 import { Users, Sun, Moon, ArrowLeft } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
+import { SourceCodeLink } from '../components/app/SourceCodeLink';
 
 
 const Login: React.FC = () => {
@@ -282,6 +284,8 @@ const Login: React.FC = () => {
 
             <p className="absolute bottom-6 text-label-sm text-muted-foreground text-center w-full">
                 &copy; {new Date().getFullYear()} OpenFamily <a href="https://nexaflow.fr" target="_blank" rel="noopener noreferrer" className="text-nexus-blue hover:underline">NexaFlow</a> &middot; {t('auth:footer')}
+                {/* Tofu (2026-10-27): the source of this copy, before sign-in (AGPL-3.0, section 13). */}
+                {' '}&middot; <SourceCodeLink className="text-nexus-blue hover:underline">{t('auth:sourceCode')}</SourceCodeLink>
             </p>
         </div>
     );
