@@ -7,6 +7,7 @@ import { Download, Upload, CheckCircle, AlertCircle, Loader2, Bell, BellOff, Glo
 import { Card, CardContent, Button, Input, Select } from '../components/ui';
 import { LanguageSwitcher } from '../components/ui/LanguageSwitcher';
 import RegionalPreferences from '../components/app/RegionalPreferences';
+import SignInCard from '../components/app/SignInCard';
 import { useNotifications } from '../hooks/useNotifications';
 import { useAuth } from '../contexts/AuthContext';
 import { isNative, getServerUrl, clearServerUrl } from '../lib/serverConfig';
@@ -1043,6 +1044,9 @@ const Settings: React.FC = () => {
                     </div>
                 </CardContent>
             </Card>
+
+            {/* Sign-in: SSO link, sign out everywhere */}
+            <SignInCard />
 
             {/* Currency */}
             <Card>

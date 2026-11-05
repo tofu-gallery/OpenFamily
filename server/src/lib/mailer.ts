@@ -1,6 +1,7 @@
 // Tofu (2026-10-27): modified for Tofu's app gallery: English when an account has no language. See TOFU.md.
 import nodemailer, { type Transporter } from 'nodemailer';
 import logger from './logger';
+import { isLanguage, Language } from './languages';
 
 /**
  * Transactional email.
@@ -49,18 +50,10 @@ const getTransporter = (): Transporter => {
     return transporter;
 };
 
-type Language = 'fr' | 'en' | 'pt' | 'ru' | 'es' | 'zh' | 'de';
-
 const normalizeLanguage = (language?: string | null): Language => {
-    const normalized = language?.trim().toLowerCase() ?? '';
-    if (normalized.startsWith('en')) return 'en';
-    if (normalized.startsWith('pt')) return 'pt';
-    if (normalized.startsWith('ru')) return 'ru';
-    if (normalized.startsWith('es')) return 'es';
-    if (normalized.startsWith('zh')) return 'zh';
-    if (normalized.startsWith('de')) return 'de';
-    if (normalized.startsWith('fr')) return 'fr';
-    return 'en';
+    const primary = language?.trim().toLowerCase().split(/[-_]/)[0];
+    // Tofu (2026-10-27): English when the language is unset or unknown (upstream: French).
+    return isLanguage(primary) ? primary : 'en';
 };
 
 /** Escape characters that would break out of HTML text nodes or attributes. */

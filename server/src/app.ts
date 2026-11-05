@@ -27,6 +27,7 @@ import aiRoutes from './routes/ai';
 import categoriesRoutes from './routes/categories';
 import kakeiboRoutes from './routes/kakeibo';
 import postsRoutes from './routes/posts';
+import oidcRoutes from './routes/oidc';
 import { loadEnv } from './config/loadEnv';
 import logger from './lib/logger';
 
@@ -172,7 +173,10 @@ app.get('/.well-known/assetlinks.json', (req, res) => {
 
     return res.json([
         {
-            relation: ['delegate_permission/common.handle_all_urls'],
+            // handle_all_urls: App Links (https://<domain>/join... opens the app).
+            // get_login_creds: the Play Console "credential sharing" association,
+            // so password managers can offer the site's credentials in the app.
+            relation: ['delegate_permission/common.handle_all_urls', 'delegate_permission/common.get_login_creds'],
             target: {
                 namespace: 'android_app',
                 package_name: process.env.ANDROID_PACKAGE_NAME || 'fr.nexaflow.openfamily',
@@ -185,10 +189,15 @@ app.get('/.well-known/assetlinks.json', (req, res) => {
 // API Routes
 app.use('/api/auth/login', authRateLimiter);
 app.use('/api/auth/register', authRateLimiter);
+app.use('/api/auth/logout-all', authRateLimiter);
+app.use('/api/auth/oidc/start', authRateLimiter);
+app.use('/api/auth/oidc/exchange', authRateLimiter);
+app.use('/api/auth/oidc/link', authRateLimiter);
 // Outbound-triggering routes: looser limiter applied to the whole path prefix.
 app.use('/api/ai', outboundRateLimiter);
 app.use('/api/recipes/import-url', outboundRateLimiter);
 app.use('/api/integrations', outboundRateLimiter);
+app.use('/api/auth/oidc', oidcRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/auth', userSettingsRoutes);
 app.use('/api/shopping', shoppingRoutes);

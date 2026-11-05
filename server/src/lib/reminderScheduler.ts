@@ -6,8 +6,7 @@ import { sendPushToUser } from './pushService';
 import logger from './logger';
 import { expandRecurringAppointments } from './appointmentRecurrence';
 import { ALL_DAY_REMINDER_HOUR, MAX_REMINDER_MINUTES, normalizeReminderMinutes } from './reminders';
-
-type ReminderLanguage = 'fr' | 'en' | 'pt' | 'ru' | 'es' | 'zh' | 'de';
+import { isLanguage, Language } from './languages';
 
 interface Occurrence {
     id: string;
@@ -32,8 +31,7 @@ const fromLocalNaive = (value: string): Date => new Date(value.slice(0, 19));
 // still sent if it is less than this late; older ones are dropped, not spammed.
 const GRACE_MS = 15 * 60 * 1000;
 
-const LANGUAGES: ReminderLanguage[] = ['fr', 'en', 'pt', 'ru', 'es', 'zh', 'de'];
-const TITLE_PREFIX: Record<ReminderLanguage, string> = {
+const TITLE_PREFIX: Record<Language, string> = {
     fr: '⏰ Rappel : ',
     en: '⏰ Reminder: ',
     pt: '⏰ Lembrete: ',
@@ -42,7 +40,7 @@ const TITLE_PREFIX: Record<ReminderLanguage, string> = {
     zh: '⏰ 提醒：',
     de: '⏰ Erinnerung: ',
 };
-const NOW_TEXT: Record<ReminderLanguage, string> = {
+const NOW_TEXT: Record<Language, string> = {
     fr: 'Maintenant',
     en: 'Now',
     pt: 'Agora',
@@ -51,14 +49,14 @@ const NOW_TEXT: Record<ReminderLanguage, string> = {
     zh: '现在',
     de: 'Jetzt',
 };
-const LOCALE: Record<ReminderLanguage, string> = {
+const LOCALE: Record<Language, string> = {
     fr: 'fr-FR', en: 'en-GB', pt: 'pt-BR', ru: 'ru-RU', es: 'es-ES', zh: 'zh-CN', de: 'de-DE',
 };
 
 const capitalize = (text: string) => text.charAt(0).toLocaleUpperCase() + text.slice(1);
 
 /** "In 30 minutes", "In 2 hours", "Tomorrow", "Next week", in the member's language. */
-export function describeLeadTime(minutes: number, lang: ReminderLanguage): string {
+export function describeLeadTime(minutes: number, lang: Language): string {
     if (minutes === 0) return NOW_TEXT[lang];
     const rtf = new Intl.RelativeTimeFormat(LOCALE[lang], { numeric: 'auto' });
     if (minutes % (7 * 24 * 60) === 0) return capitalize(rtf.format(minutes / (7 * 24 * 60), 'week'));
@@ -68,7 +66,7 @@ export function describeLeadTime(minutes: number, lang: ReminderLanguage): strin
 }
 
 /** "Today", "Tomorrow", "In 3 days": how far the day of an all-day event is. */
-function describeDay(occurrenceDay: string, now: Date, lang: ReminderLanguage): string {
+function describeDay(occurrenceDay: string, now: Date, lang: Language): string {
     const today = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
     const [y, m, d] = occurrenceDay.split('-').map(Number);
     const days = Math.round((Date.UTC(y, m - 1, d) - today) / 86400000);
@@ -80,9 +78,8 @@ export function buildReminderTexts(
     minutes: number,
     now: Date
 ): { title: string; body: string } {
-    const lang = (LANGUAGES as string[]).includes(occurrence.language)
-        ? occurrence.language as ReminderLanguage
-        : 'en';
+    // Tofu (2026-10-27): English when the language is unset or unknown (upstream: French).
+    const lang = isLanguage(occurrence.language) ? occurrence.language : 'en';
     const start = String(occurrence.start_time);
     const where = occurrence.location ? ` · ${occurrence.location}` : '';
     const body = occurrence.is_all_day
